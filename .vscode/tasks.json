@@ -1,0 +1,152 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build DiskII",
+            "type": "shell",
+            "command": "make -f Makefile",
+            "presentation": {
+                "reveal": "never"
+            },
+            "options": {
+                "cwd": "${workspaceRoot}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
+            "label": "Build Bootloader DiskII",
+            "type": "shell",
+            "command": "make -f Makefile USE_BOOTLOADER=1",
+            "presentation": {
+                "reveal": "never"
+            },
+            "options": {
+                "cwd": "${workspaceRoot}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
+            "label": "Build Bootloader and A2F mode DiskII",
+            "type": "shell",
+            "command": "make -f Makefile USE_BOOTLOADER=1 A2F_MODE=1",
+            "presentation": {
+                "reveal": "never"
+            },
+            "options": {
+                "cwd": "${workspaceRoot}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
+            "label": "Clean",
+            "type": "shell",
+            "command": "make -f Makefile clean",
+            "presentation": {
+                "reveal": "never"
+            },
+            "options": {
+                "cwd": "${workspaceRoot}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
+            "label": "Clean Make",
+            "type": "shell",
+            "command": "make -f Makefile",
+            "presentation": {
+                "reveal": "never"
+            },
+            "options": {
+                "cwd": "${workspaceRoot}"
+            },
+            "dependsOn": "Clean",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
+            "label": "Build Flash",
+            "type": "shell",
+            "command": "make -f Makefile flash",
+            "presentation": {
+                "reveal": "never"
+            },
+            "options": {
+                "cwd": "${workspaceRoot}"
+            },
+            "dependsOn": "Build DiskII",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
+            "label": "Build Hex",
+            "type": "shell",
+            "command": "arm-none-eabi-objcopy -O ihex ./build/AppleIISDiskII_stm32f411_sdio.elf ./build/AppleIISDiskII_stm32f411_sdio.hex",
+            "presentation": {
+                "reveal": "never"
+            },
+            "options": {
+                "cwd": "${workspaceRoot}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
+            "label": "Build UF2",
+            "type": "shell",
+            "command": "python3 ./uf2conv/uf2conv.py -c -f 0x57755a57 ./build/AppleIISDiskII_stm32f411_sdio.hex -o ./build/AppleIISDiskII_stm32f411_sdio.UF2",
+            "dependsOn": "Build Hex",
+            "presentation": {
+                "reveal": "never"
+            },
+            "options": {
+                "cwd": "${workspaceRoot}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
+        }
+    ]
+}
