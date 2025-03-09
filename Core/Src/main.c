@@ -602,7 +602,7 @@ int main(void)
   T1_DIER|=TIM_DIER_UIE;
   TIM1->DIER|=T1_DIER;
    
-  uint8_t pflgPacket=0x0;
+  int packetIdx=0x0;
   while (1){
     switch (phase) {
       // phase lines for smartport bus reset
@@ -619,7 +619,7 @@ int main(void)
       case 0x0b:
       case 0x0e:
       case 0x0f:
-
+            wrStartOffset=0;
             wrBitCounter=0;
             wrBytes=0;
             wrByteWindow=0;
@@ -629,23 +629,34 @@ int main(void)
 
             while (WR_REQ_PHASE==0);
             
-            while (WP_ACK==1);
             HAL_TIM_OC_Stop_IT(&htim2,TIM_CHANNEL_2);
-            WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_RESET); 
-           
-            wrBitCounter=0;
-            wrBytes=0;
-            wrByteWindow=0;
-
+            while (WP_ACK==1);
+            WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_RESET);
+            packet_bufferWR[wrBytes]=0x0; 
+            WritePin(DEBUG2_GPIO_Port,DEBUG2_Pin,GPIO_PIN_SET);
+            print_packet(packet_bufferWR,wrBytes);
+            verifyCmdpktChecksum2(packet_bufferWR,wrBytes);
+            print_packet(packet_bufferRD,wrBytes);
+            //verifyCmdpktChecksum2(packet_bufferRD,rdBytes);
+            WritePin(DEBUG2_GPIO_Port,DEBUG2_Pin,GPIO_PIN_RESET);
+            
+            rdStartOffset=0;
+            rdBitCounter=0;
+            rdBytes=0;
+            rdByteWindow=0;
+            printf("idx:%04d\n",packetIdx);
             while (WP_ACK==0);
             HAL_TIM_OC_Start_IT(&htim1,TIM_CHANNEL_1);
             WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_SET); 
 
             while (WP_ACK==1);
             HAL_TIM_OC_Stop_IT(&htim1,TIM_CHANNEL_1);
-            WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_RESET); 
+            WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_RESET);
 
             while(WP_ACK==0);
+            packet_bufferRD[rdBytes]=0x0;
+            packetIdx++;
+            
 
       break;
     }
@@ -865,7 +876,7 @@ static void MX_USART1_UART_Init(void)
 
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = 230400;
+  huart1.Init.BaudRate = 921600; //460800;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
