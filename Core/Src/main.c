@@ -68,14 +68,20 @@ static void MX_USART1_UART_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
-
+/*
 static void SmartPortPhaseIRQ();
 static void SmartPortDeviceEnableIRQ();
 static void SmartPortWpAckIRQ();
 static void SmartPortWrReqIRQ();
+*/
 
 static void SmartPortReceiveWRDataIRQ();
 static void SmartPortReceiveRDDataIRQ();
+static uint8_t verifyCmdpktChecksum(char * packet_buffer);
+
+
+static void print_packet (unsigned char* data, int bytes);
+int packet_length (unsigned char * packet_buffer);
 
 static volatile uint8_t rdData=0;
 static volatile uint8_t prevRdData=0;
@@ -124,7 +130,21 @@ void EnableTiming(void){
 }
 
 
+static void WritePin(GPIO_TypeDef* GPIOx, uint16_t GPIO_Pin, GPIO_PinState PinState)
+{
+  /* Check the parameters */
+  //assert_param(IS_GPIO_PIN(GPIO_Pin));
+  //assert_param(IS_GPIO_PIN_ACTION(PinState));
 
+  if(PinState != GPIO_PIN_RESET)
+  {
+    GPIOx->BSRR = GPIO_Pin;
+  }
+  else
+  {
+    GPIOx->BSRR = (uint32_t)GPIO_Pin << 16U;
+  }
+}
 /**
   * @brief TIMER 1 IRQ Interrupt is handling the Reading from DEVICE to HOST
   * @param None
@@ -138,21 +158,35 @@ void TIM1_CC_IRQHandler(void){
   
   if (TIM1->SR & TIM_SR_UIF){
     TIM1->SR &= ~TIM_SR_UIF;                              // Clear the overflow interrupt 
-    SmartPortReceiveRDDataIRQ();
+    
   }else if (TIM1->SR & TIM_SR_CC1IF){                     // Pulse compare interrrupt on Channel 1
     TIM1->SR &= ~TIM_SR_CC1IF;                            // Clear the compare interrupt flag
-    
+    SmartPortReceiveRDDataIRQ();
   }else
     TIM1->SR = 0;
-
 }
+
 /**
   * @brief 
   * @param None
   * @retval None
   */
  void TIM1_UP_TIM10_IRQHandler(void){
-
+ // HAL_GPIO_WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_SET);
+ // SmartPortReceiveRDDataIRQ();
+ // HAL_GPIO_WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_RESET);
+ if (TIM1->SR & TIM_SR_UIF){
+  TIM1->SR &= ~TIM_SR_UIF;
+  return;
+  
+  
+  //printf("%d",rdData);
+//rdData=RD_DATA_GPIO_Port->IDR & RD_DATA_Pin;
+return;
+ }else{
+  //SmartPortReceiveRDDataIRQ(); 
+  TIM1->SR = 0;
+ }
 }
 
 /**
@@ -171,129 +205,103 @@ void TIM2_IRQHandler(void){
     TIM2->SR=0;
   }  
 }
+/*
 
-void EXTI0_IRQHandler(void){
-  SmartPortPhaseIRQ();
-}
+*/
 
-void EXTI1_IRQHandler(void){
-  SmartPortPhaseIRQ();
-}
-
-void EXTI2_IRQHandler(void){
-  SmartPortPhaseIRQ();
-}
-
-void EXTI3_IRQHandler(void){
-  SmartPortPhaseIRQ();
-}
-
-void EXTI15_10_IRQHandler(void){
-  SmartPortWpAckIRQ();
-}
-
+/*
 void EXTI9_5_IRQHandler(void){
-  SmartPortDeviceEnableIRQ();
-  SmartPortWrReqIRQ();
+
+  //SmartPortDeviceEnableIRQ();
+  //SmartPortWrReqIRQ();
+  WR_REQ_PHASE=WR_REQ_GPIO_Port->IDR & WR_REQ_Pin;
+  printf("H %d\n",WR_REQ_PHASE);
 }
+*/
 
-
-static void SmartPortPhaseIRQ(){
+void SmartPortPhaseIRQ(){
     
   phase=(GPIOA->IDR&0b0000000000001111);
   return;
 }
 
 volatile uint8_t DEVICE_ENABLE=0x0;
-static void SmartPortDeviceEnableIRQ(){
-  DEVICE_ENABLE=(GPIOA->IDR&0b0000000000001111);
+
+void SmartPortDeviceEnableIRQ(){
+  if ((DEVICE_ENABLE_GPIO_Port->IDR & DEVICE_ENABLE_Pin)==0)
+    DEVICE_ENABLE=0;
+  else
+    DEVICE_ENABLE=1;
 }
 
-volatile uint8_t pWR_REQ_PHASE=0x1;
-static void SmartPortWrReqIRQ(){
+uint8_t WP_ACK=0;
+uint8_t pWP_ACK=0;
 
-  /*if ((WR_REQ_GPIO_Port->IDR & WR_REQ_Pin)==0)
+volatile uint8_t pWR_REQ_PHASE=0x1;
+
+void SmartPortWrReqIRQ(){
+
+  if ((WR_REQ_GPIO_Port->IDR & WR_REQ_Pin)==0)
        WR_REQ_PHASE=0;
   else
        WR_REQ_PHASE=1;
-  */
-  WR_REQ_PHASE=WR_REQ_GPIO_Port->IDR & WR_REQ_Pin;
 
-  if (WR_REQ_PHASE==0 && pWR_REQ_PHASE!=WR_REQ_PHASE){
-
-    flgPacket=0;
-    wrData=0;
-    prevWrData=0;
-    wrBytes=0;
-    wrBitCounter=0;
-    wrStartOffset=0;
-
-    flgPacket=0;
-    rdData=0;
-    rdData=0;
-    rdBytes=0;
-    rdBitCounter=0;
-    rdStartOffset=0;
-
-    rdByteWindow=0x0;
-    wrByteWindow=0x0;
-    switch (phase){
-      case 0x05:
-        log_info("Ph:0x05 Reset message");                                                                         
-        while (phase == 0x05);                                                      // Wait for phases to change 
-        break;                                                                                      
-      case 0x0a:                                                                            // Phase lines for smartport bus enable
-      case 0x0b:                                                                            // Ph3=1 ph2=x ph1=1 ph0=x
-      case 0x0e:
-      case 0x0f:
-        HAL_TIM_OC_Start_IT(&htim1,TIM_CHANNEL_1);
-        HAL_TIM_OC_Start_IT(&htim2,TIM_CHANNEL_2);
-        log_info("hereA");
-      default:
-        break;
-    }
-  }else if (WR_REQ_PHASE==1 && pWR_REQ_PHASE!=WR_REQ_PHASE){
-    switch (phase){
-      case 0x0a:
-      case 0x0b:
-      case 0x0e:
-      case 0x0f:
-        HAL_TIM_OC_Stop_IT(&htim1,TIM_CHANNEL_1);
-        packet_bufferRD[rdBytes++]=0x0;
-        
-        HAL_TIM_OC_Stop_IT(&htim2,TIM_CHANNEL_2);
-        packet_bufferWR[wrBytes++]=0x0;
-        log_info("hereB");
-        flgPacket=1;
-        break;
-      default:
-       break;
-    }
-  }
   pWR_REQ_PHASE=WR_REQ_PHASE;     
 }
 
+void SmartPortWpAckIRQ(){
 
-uint8_t WP_ACK=0;
-static void SmartPortWpAckIRQ(){
-  WP_ACK=WR_PROTECT_GPIO_Port->IDR & WR_PROTECT_Pin;
- /* if ((WR_PROTECT_GPIO_Port->IDR & WR_PROTECT_Pin)==0)
+  if ((WR_PROTECT_GPIO_Port->IDR & WR_PROTECT_Pin)==0)
     WP_ACK=0;
   else
     WP_ACK=1;
-    */
+  return;
+}
+
+
+static void SmartPortReceiveRDDataIRQ(){
+  // ADD WR_REQ IRQ TO MANAGE START & STOP OF THE TIMER
+  //WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_SET);
+  //  WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_SET);
+  if ((RD_DATA_GPIO_Port->IDR & RD_DATA_Pin)==0)                                       // get WR_DATA DO NOT USE THE HAL function creating an overhead
+    rdData=0;
+  else
+    rdData=1;
+  //  WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_RESET);
+    
+    rdByteWindow<<=1;
+    rdByteWindow|=rdData;
+
+  if (rdByteWindow & 0x80){                                                 // Check if ByteWindow Bit 7 is 1 meaning we have a full bytes 0b1xxxxxxx 0x80
+    
+    packet_bufferRD[rdBytes]=rdByteWindow;
+    
+    if (rdStartOffset==0 && rdByteWindow==0xC3 && rdBitCounter>10)          // Identify when the message start
+      rdStartOffset=0x01;
+    
+    //printf("%02X",rdByteWindow);
+    rdByteWindow=0x0;
+
+    if (rdStartOffset!=0)                                                     // Start writing to packet_buffer only if offset is not 0 (after sync byte)
+      rdBytes++;
+    
+    if (rdBytes==600)
+      rdBytes=0;
+    
+  }
+  rdBitCounter++;                                      // Next bit please ;)
 }
 
 static void SmartPortReceiveWRDataIRQ(){
   // ADD WR_REQ IRQ TO MANAGE START & STOP OF THE TIMER
-  
-  /*if ((GPIOA->IDR & WR_DATA_Pin)==0)                                       // get WR_DATA DO NOT USE THE HAL function creating an overhead
+  //WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_SET);
+  if ((WR_DATA_GPIO_Port->IDR & WR_DATA_Pin)==0)                                       // get WR_DATA DO NOT USE THE HAL function creating an overhead
       wrData=0;
   else
       wrData=1;
-  */  
-  
-  wrData=WR_DATA_GPIO_Port->IDR & WR_DATA_Pin;
+  //WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_RESET); 
+ //printf("za\n");
+  //wrData=WR_DATA_GPIO_Port->IDR & WR_DATA_Pin;
   
   wrData^= 0x01u;                                                           // get /WR_DATA
   xorWrData=wrData ^ prevWrData;                                            // Compute Magnetic polarity inversion
@@ -318,39 +326,203 @@ static void SmartPortReceiveWRDataIRQ(){
   wrBitCounter++;                                                           // Next bit please ;)
 }
 
-static void SmartPortReceiveRDDataIRQ(){
-  /*if ((GPIOA->IDR & RD_DATA_Pin)==0)                                       // get WR_DATA DO NOT USE THE HAL function creating an overhead
-    rdData=0;
-  else
-    rdData=1;
-  */
-  rdData=RD_DATA_GPIO_Port->IDR & RD_DATA_Pin;
-  
-  rdByteWindow<<=1;
-  rdByteWindow|=rdData;
 
-  if (rdByteWindow & 0x80){                                                 // Check if ByteWindow Bit 7 is 1 meaning we have a full bytes 0b1xxxxxxx 0x80
-  
-    packet_bufferRD[rdBytes]=rdByteWindow;
-    
-    if (rdStartOffset==0 && rdByteWindow==0xC3 && rdBitCounter>10)          // Identify when the message start
-      rdStartOffset=0x01;
-    
-    rdByteWindow=0x0;
+static int decodeDataPacket (char * packet_buffer, int pl){
 
-    if (rdStartOffset!=0)                                                     // Start writing to packet_buffer only if offset is not 0 (after sync byte)
-      rdBytes++;
+  int grpbyte, grpcount;
+  unsigned char numgrps, numodd;
+  unsigned char checksum = 0, bit0to6, bit7, oddbits, evenbits;
+  unsigned char group_buffer[8];
+
+  log_info("Data Packet Len:%d",pl);
+  
+  numodd = packet_buffer[6] & 0x7f;                                                               // Handle arbitrary length packets :) 
+  numgrps = packet_buffer[7] & 0x7f;
+
+  for (uint8_t count = 1;  count < 8;  count++)                                                   // First, checksum  packet header, because we're about to destroy it
+      checksum = checksum ^ packet_buffer[count];                                                 // now xor the packet header bytes
+
+  log_info("PL-3:%02X PL-2:%02X",packet_buffer[pl-3],packet_buffer[pl-2]);
+  evenbits = packet_buffer[pl-3] & 0x55;
+  oddbits = (packet_buffer[pl-2] & 0x55 ) << 1;
+
+  log_info("evBits %02X, oddBit:%02X",evenbits,oddbits);
+  for(int i = 0; i < numodd; i++){                                                                 //add oddbyte(s), 1 in a 512 data packet
+      packet_buffer[i] = ((packet_buffer[8] << (i+1)) & 0x80) | (packet_buffer[9+i] & 0x7f);
   }
 
-  rdBitCounter++;                                                           // Next bit please ;)
+  for (grpcount = 0; grpcount < numgrps; grpcount++){                                             // 73 grps of 7 in a 512 byte packet
+      memcpy(group_buffer, packet_buffer + 10 + (grpcount * 8), 8);
+      for (grpbyte = 0; grpbyte < 7; grpbyte++) {
+          bit7 = (group_buffer[0] << (grpbyte + 1)) & 0x80;
+          bit0to6 = (group_buffer[grpbyte + 1]) & 0x7f;
+          packet_buffer[1 + (grpcount * 7) + grpbyte] = bit7 | bit0to6;
+      }
+  }
+
+  for (uint8_t count = 0;  count < (numgrps*7+1); count++)                                                   // Verify checksum
+     checksum = checksum ^ packet_buffer[count];   
+
+  log_info("decode Data checksum %02X<>%02X",checksum,(oddbits | evenbits));
+  print_packet ((unsigned char*) packet_buffer,pl);
+  
+  if (checksum == (oddbits | evenbits))
+      return 0;                                                                                   // NO error
+  else
+      return 6;                                                                                   // Smartport bus error code
+
+}
+static uint8_t verifyCmdpktChecksum2(char * packet_buffer,int length){
+  int count = 0;
+  unsigned char evenbits, oddbits, bit7, bit0to6, grpbyte;
+  unsigned char calc_checksum = 0; //initial value is 0
+  unsigned char pkt_checksum;
+
+
+/*
+C3              PBEGIN    MARKS BEGINNING OF PACKET             32 micro Sec.       6   0
+81              DEST      DESTINATION UNIT NUMBER               32 micro Sec.       7   1
+80              SRC       SOURCE UNIT NUMBER                    32 micro Sec.       8   2
+80              TYPE      PACKET TYPE FIELD                     32 micro Sec.       9   3
+80              AUX       PACKET AUXILLIARY TYPE FIELD          32 micro Sec.      10   4
+80              STAT      DATA STATUS FIELD                     32 micro Sec.      11   5
+82              ODDCNT    ODD BYTES COUNT                       32 micro Sec.      12   6
+81              GRP7CNT   GROUP OF 7 BYTES COUNT                32 micro Sec.      13   7
+80              ODDMSB    ODD BYTES MSB's                       32 micro Sec.      14   8
+81              COMMAND   1ST ODD BYTE = Command Byte           32 micro Sec.      15   9
+83              PARMCNT   2ND ODD BYTE = Parameter Count        32 micro Sec.      16  10
+80              GRP7MSB   MSB's FOR 1ST GROUP OF 7              32 micro Sec.      17  11
+80              G7BYTE1   BYTE 1 FOR 1ST GROUP OF 7             32 micro Sec.      18  12
+
+0000: C3 81 80 80 80 80 82 81 80 81 83 82 80 88 80 80 - ..80808080..80...80.8080
+0010: 80 FF 80 FF BB C8
+
+*/
+
+  unsigned char oddcnt=packet_buffer[SP_ODDCNT]  & 0x7f;
+  unsigned char grpcnt=packet_buffer[SP_GRP7CNT] & 0x7f;
+    
+  for(u_int8_t i = 0; i < oddcnt; i++){                                                                 //add oddbyte(s), 1 in a 512 data packet
+      calc_checksum ^= ((packet_buffer[SP_ODDMSB] << (i+1)) & 0x80) | (packet_buffer[SP_COMMAND+i] & 0x7f);
+  }
+
+  unsigned char group_buffer[8];
+
+  for (unsigned char grp = 0; grp < grpcnt; grp++){                                             // 73 grps of 7 in a 512 byte packet
+    
+    memcpy(group_buffer, packet_buffer + SP_COMMAND+ oddcnt + (grp * 8), 8);
+    
+    for (grpbyte = 0; grpbyte < 7; grpbyte++) {
+        bit7 = (group_buffer[0] << (grpbyte + 1)) & 0x80;
+        bit0to6 = (group_buffer[grpbyte + 1]) & 0x7f;
+        //packet_buffer[1 + (grpcount * 7) + grpbyte] = bit7 | bit0to6;
+        calc_checksum ^= bit7 | bit0to6;
+    }
+  }
+
+  // calculate checksum for overhead bytes
+  for (count = 1; count < SP_ODDMSB; count++) // start from first id byte
+    calc_checksum ^= packet_buffer[count];
+
+  oddbits = (packet_buffer[length - 2] & 0x55 )<< 1 ;
+  evenbits = packet_buffer[length - 3] & 0x55;
+    
+  pkt_checksum = oddbits | evenbits;
+
+  if ( pkt_checksum == calc_checksum )
+      return 1;
+  else{
+      //print_packet ((unsigned char*) packet_buffer,packet_length());
+      log_info("packet_buffer[length - 2]:%02X",packet_buffer[length - 2]);
+      log_info("packet_buffer[length - 3]:%02X",packet_buffer[length - 3]);
+      log_warn("pkt_chksum:%02X!=calc_chksum:%02X",pkt_checksum,calc_checksum);
+      return 0;
+  }
+
 }
 
-void print_packet (unsigned char* data, int bytes){
+static uint8_t verifyCmdpktChecksum(char * packet_buffer){
+  int count = 0, length;
+  unsigned char evenbits, oddbits, bit7, bit0to6, grpbyte;
+  unsigned char calc_checksum = 0; //initial value is 0
+  unsigned char pkt_checksum;
+
+  length = packet_length(packet_buffer);
+/*
+C3              PBEGIN    MARKS BEGINNING OF PACKET             32 micro Sec.       6   0
+81              DEST      DESTINATION UNIT NUMBER               32 micro Sec.       7   1
+80              SRC       SOURCE UNIT NUMBER                    32 micro Sec.       8   2
+80              TYPE      PACKET TYPE FIELD                     32 micro Sec.       9   3
+80              AUX       PACKET AUXILLIARY TYPE FIELD          32 micro Sec.      10   4
+80              STAT      DATA STATUS FIELD                     32 micro Sec.      11   5
+82              ODDCNT    ODD BYTES COUNT                       32 micro Sec.      12   6
+81              GRP7CNT   GROUP OF 7 BYTES COUNT                32 micro Sec.      13   7
+80              ODDMSB    ODD BYTES MSB's                       32 micro Sec.      14   8
+81              COMMAND   1ST ODD BYTE = Command Byte           32 micro Sec.      15   9
+83              PARMCNT   2ND ODD BYTE = Parameter Count        32 micro Sec.      16  10
+80              GRP7MSB   MSB's FOR 1ST GROUP OF 7              32 micro Sec.      17  11
+80              G7BYTE1   BYTE 1 FOR 1ST GROUP OF 7             32 micro Sec.      18  12
+
+0000: C3 81 80 80 80 80 82 81 80 81 83 82 80 88 80 80 - ..80808080..80...80.8080
+0010: 80 FF 80 FF BB C8
+
+*/
+
+  //unsigned char oddcnt=packet_buffer[SP_ODDCNT] & 0x80;
+  //unsigned char grpcnt=packet_buffer[SP_GRP7CNT] & 0x80;
+
+  //2 oddbytes in cmd packet
+  calc_checksum ^= ((packet_buffer[SP_ODDMSB] << 1) & 0x80) | (packet_buffer[SP_COMMAND] & 0x7f);
+  calc_checksum ^= ((packet_buffer[SP_ODDMSB] << 2) & 0x80) | (packet_buffer[SP_PARMCNT] & 0x7f);
+
+  // 1 group of 7 in a cmd packet
+  
+  for (grpbyte = 0; grpbyte < 7; grpbyte++) {
+      bit7 = (packet_buffer[SP_GRP7MSB] << (grpbyte + 1)) & 0x80;
+      bit0to6 = (packet_buffer[SP_G7BYTE1 + grpbyte]) & 0x7f;
+      calc_checksum ^= bit7 | bit0to6;
+  }
+
+  // calculate checksum for overhead bytes
+  for (count = 1; count < 8; count++) // start from first id byte
+      calc_checksum ^= packet_buffer[count];
+
+  oddbits = (packet_buffer[length - 2] & 0x55 )<< 1 ;
+  evenbits = packet_buffer[length - 3] & 0x55;
+  
+  pkt_checksum = oddbits | evenbits;
+
+  // calculate checksum for overhead bytes
+  
+
+  if ( pkt_checksum == calc_checksum )
+      return 1;
+  else{
+      //print_packet ((unsigned char*) packet_buffer,packet_length());
+      log_info("packet_buffer[length - 2]:%02X",packet_buffer[length - 2]);
+      log_info("packet_buffer[length - 3]:%02X",packet_buffer[length - 3]);
+      log_warn("pkt_chksum:%02X!=calc_chksum:%02X",pkt_checksum,calc_checksum);
+      return 0;
+  }
+
+}
+
+//*****************************************************************************
+// Function: print_packet
+// Parameters: pointer to data, number of bytes to be printed
+// Returns: none
+//
+// Description: prints packet data for debug purposes to the serial port
+//*****************************************************************************
+
+static void print_packet (unsigned char* data, int bytes){
   int count, row;
   char xx;
 
   //log_info("Dump packet src:%02X,dst:%02X,type:%02X,aux:%02x,cmd:%02X,paramcnt:%02X",data[SP_SRC],data[SP_DEST],data[SP_TYPE],data[SP_AUX],data[SP_COMMAND],data[SP_PARMCNT]);
-  printf("\r\n");
+  log_info("Packet size:%03d, src:%02X, dst:%02X, type:%02X, aux:%02x, cmd:%02X, paramcnt:%02X",bytes,data[SP_SRC],data[SP_DEST],data[SP_TYPE],data[SP_AUX],data[SP_COMMAND],data[SP_PARMCNT]);
+
+
   for (count = 0; count < bytes; count = count + 16) {
       
       printf("%04X: ", count);
@@ -372,7 +544,7 @@ void print_packet (unsigned char* data, int bytes){
       }
       printf("\r\n");
   }
-  
+  printf(".\r\n");
 }
 
 int packet_length (unsigned char * packet_buffer){
@@ -418,11 +590,8 @@ int main(void)
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   
-  /* USER CODE END 2 */
-
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
-  log_info("this is the sound of sea");
+  
+  log_info("This is the sound of sea\n\r");
   int T2_DIER=0x0;
   T2_DIER|=TIM_DIER_CC2IE;
   T2_DIER|=TIM_DIER_UIE;
@@ -432,21 +601,61 @@ int main(void)
   T1_DIER|=TIM_DIER_CC1IE;
   T1_DIER|=TIM_DIER_UIE;
   TIM1->DIER|=T1_DIER;
-
-  //HAL_TIM_OC_Start_IT(&htim1,TIM_CHANNEL_1);   
-  //HAL_TIM_OC_Start_IT(&htim2,TIM_CHANNEL_2);   
+   
   uint8_t pflgPacket=0x0;
+  while (1){
+    switch (phase) {
+      // phase lines for smartport bus reset
+      // ph3=0 ph2=1 ph1=0 ph0=1
+      case 0x05:
+
+      // Monitor phase lines for reset to clear
+          while (phase == 0x05);                                                      // Wait for phases to change 
+          log_info("Ph:0x05 Reset message");
+          break;
+      // Phase lines for smartport bus enable
+      // Ph3=1 ph2=x ph1=1 ph0=x
+      case 0x0a:
+      case 0x0b:
+      case 0x0e:
+      case 0x0f:
+
+            wrBitCounter=0;
+            wrBytes=0;
+            wrByteWindow=0;
+            while (WR_REQ_PHASE==1);
+            HAL_TIM_OC_Start_IT(&htim2,TIM_CHANNEL_2);
+            WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_SET); 
+
+            while (WR_REQ_PHASE==0);
+            
+            while (WP_ACK==1);
+            HAL_TIM_OC_Stop_IT(&htim2,TIM_CHANNEL_2);
+            WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_RESET); 
+           
+            wrBitCounter=0;
+            wrBytes=0;
+            wrByteWindow=0;
+
+            while (WP_ACK==0);
+            HAL_TIM_OC_Start_IT(&htim1,TIM_CHANNEL_1);
+            WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_SET); 
+
+            while (WP_ACK==1);
+            HAL_TIM_OC_Stop_IT(&htim1,TIM_CHANNEL_1);
+            WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_RESET); 
+
+            while(WP_ACK==0);
+
+      break;
+    }
+  }
+  /* USER CODE END 2 */
+
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
   while (1)
   {
-    if (flgPacket==1 && pflgPacket!=flgPacket){
-      printf("READ MSG:\n");
-      print_packet(packet_bufferRD,packet_length(packet_bufferRD));
-
-      printf("WRITE MSG:\n");
-      print_packet(packet_bufferWR,packet_length(packet_bufferWR));
-    }
-    pflgPacket=flgPacket;
-
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -522,7 +731,7 @@ static void MX_TIM1_Init(void)
   htim1.Instance = TIM1;
   htim1.Init.Prescaler = 0;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 32*12;
+  htim1.Init.Period = 32*12+5;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -550,7 +759,7 @@ static void MX_TIM1_Init(void)
     Error_Handler();
   }
   sConfigOC.OCMode = TIM_OCMODE_TIMING;
-  sConfigOC.Pulse = 6*12;
+  sConfigOC.Pulse = 32*12-15;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
@@ -600,7 +809,7 @@ static void MX_TIM2_Init(void)
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 0;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 32*12-1;
+  htim2.Init.Period = 32*12-1-2;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -689,47 +898,56 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
-  /*Configure GPIO pin : PHASE0_Pin */
-  GPIO_InitStruct.Pin = PHASE0_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(PHASE0_GPIO_Port, &GPIO_InitStruct);
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(DEBUG1_GPIO_Port, DEBUG1_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : PHASE1_Pin PHASE2_Pin PHASE3_Pin PA4
-                           RD_DATA_Pin WR_DATA_Pin */
-  GPIO_InitStruct.Pin = PHASE1_Pin|PHASE2_Pin|PHASE3_Pin|GPIO_PIN_4
-                          |RD_DATA_Pin|WR_DATA_Pin;
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(DEBUG2_GPIO_Port, DEBUG2_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pins : PHASE0_Pin PHASE1_Pin PHASE2_Pin PHASE3_Pin */
+  GPIO_InitStruct.Pin = PHASE0_Pin|PHASE1_Pin|PHASE2_Pin|PHASE3_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : WR_PROTECT_Pin WR_REQ_Pin */
-  GPIO_InitStruct.Pin = WR_PROTECT_Pin|WR_REQ_Pin;
+  /*Configure GPIO pins : RD_DATA_Pin WR_DATA_Pin */
+  GPIO_InitStruct.Pin = RD_DATA_Pin|WR_DATA_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : WR_PROTECT_Pin DEVICE_ENABLE_Pin WR_REQ_Pin */
+  GPIO_InitStruct.Pin = WR_PROTECT_Pin|DEVICE_ENABLE_Pin|WR_REQ_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : DEVICE_ENABLE_Pin */
-  GPIO_InitStruct.Pin = DEVICE_ENABLE_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  /*Configure GPIO pin : DEBUG1_Pin */
+  GPIO_InitStruct.Pin = DEBUG1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(DEVICE_ENABLE_GPIO_Port, &GPIO_InitStruct);
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(DEBUG1_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : DEBUG2_Pin */
+  GPIO_InitStruct.Pin = DEBUG2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(DEBUG2_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 2, 0);
   HAL_NVIC_EnableIRQ(EXTI0_IRQn);
 
-  HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(EXTI1_IRQn, 2, 0);
   HAL_NVIC_EnableIRQ(EXTI1_IRQn);
 
-  HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(EXTI2_IRQn, 2, 0);
   HAL_NVIC_EnableIRQ(EXTI2_IRQn);
 
-  HAL_NVIC_SetPriority(EXTI3_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(EXTI3_IRQn, 2, 0);
   HAL_NVIC_EnableIRQ(EXTI3_IRQn);
-
-  HAL_NVIC_SetPriority(EXTI4_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI4_IRQn);
 
   HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
@@ -747,6 +965,31 @@ static void MX_GPIO_Init(void)
 
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
+  //printf("FUCKH %d\n");
+  switch (GPIO_Pin){
+    
+    case DEVICE_ENABLE_Pin:
+    SmartPortDeviceEnableIRQ();
+    break;
+    
+    case WR_REQ_Pin:
+    SmartPortWrReqIRQ();
+    break;
+    case WR_PROTECT_Pin:
+    SmartPortWpAckIRQ();
+    break;
+    case PHASE0_Pin:
+    case PHASE1_Pin:
+    case PHASE2_Pin:
+    case PHASE3_Pin:
+    SmartPortPhaseIRQ();
+    break;
+    default:break;
+
+
+  }
+  
+  
 }
 
 
@@ -760,6 +1003,13 @@ PUTCHAR_PROTOTYPE{
   /* e.g. write a character to the USART1 and Loop until the end of transmission */
   
   HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 0xFFFF);  
+
+ // int __io_putchar(int ch)
+//{
+ // Write character to ITM ch.0
+ //ITM_SendChar(ch);
+ //return(ch);
+//}
   return ch;
 }
 /* USER CODE END 4 */

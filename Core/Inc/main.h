@@ -77,13 +77,15 @@ void Error_Handler(void);
 #define PHASE3_EXTI_IRQn EXTI3_IRQn
 #define RD_DATA_Pin GPIO_PIN_6
 #define RD_DATA_GPIO_Port GPIOA
-#define RD_DATA_EXTI_IRQn EXTI9_5_IRQn
 #define WR_DATA_Pin GPIO_PIN_7
 #define WR_DATA_GPIO_Port GPIOA
-#define WR_DATA_EXTI_IRQn EXTI9_5_IRQn
 #define WR_PROTECT_Pin GPIO_PIN_10
 #define WR_PROTECT_GPIO_Port GPIOB
 #define WR_PROTECT_EXTI_IRQn EXTI15_10_IRQn
+#define DEBUG1_Pin GPIO_PIN_15
+#define DEBUG1_GPIO_Port GPIOA
+#define DEBUG2_Pin GPIO_PIN_3
+#define DEBUG2_GPIO_Port GPIOB
 #define DEVICE_ENABLE_Pin GPIO_PIN_5
 #define DEVICE_ENABLE_GPIO_Port GPIOB
 #define DEVICE_ENABLE_EXTI_IRQn EXTI9_5_IRQn
@@ -92,6 +94,10 @@ void Error_Handler(void);
 #define WR_REQ_EXTI_IRQn EXTI9_5_IRQn
 
 /* USER CODE BEGIN Private defines */
+void SmartPortDeviceEnableIRQ();
+void SmartPortWrReqIRQ();
+void SmartPortPhaseIRQ();
+void SmartPortWpAckIRQ();
 
 /* USER CODE END Private defines */
 
