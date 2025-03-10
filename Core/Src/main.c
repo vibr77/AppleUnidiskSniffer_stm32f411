@@ -80,7 +80,7 @@ static void SmartPortReceiveRDDataIRQ();
 static uint8_t verifyCmdpktChecksum(char * packet_buffer);
 
 
-static void print_packet (unsigned char* data, int bytes);
+static void print_packet (unsigned char Emit,unsigned char* data, int bytes);
 int packet_length (unsigned char * packet_buffer);
 
 static volatile uint8_t rdData=0;
@@ -130,12 +130,8 @@ void EnableTiming(void){
 }
 
 
-static void WritePin(GPIO_TypeDef* GPIOx, uint16_t GPIO_Pin, GPIO_PinState PinState)
-{
-  /* Check the parameters */
-  //assert_param(IS_GPIO_PIN(GPIO_Pin));
-  //assert_param(IS_GPIO_PIN_ACTION(PinState));
-
+static void WritePin(GPIO_TypeDef* GPIOx, uint16_t GPIO_Pin, GPIO_PinState PinState){
+ 
   if(PinState != GPIO_PIN_RESET)
   {
     GPIOx->BSRR = GPIO_Pin;
@@ -205,19 +201,6 @@ void TIM2_IRQHandler(void){
     TIM2->SR=0;
   }  
 }
-/*
-
-*/
-
-/*
-void EXTI9_5_IRQHandler(void){
-
-  //SmartPortDeviceEnableIRQ();
-  //SmartPortWrReqIRQ();
-  WR_REQ_PHASE=WR_REQ_GPIO_Port->IDR & WR_REQ_Pin;
-  printf("H %d\n",WR_REQ_PHASE);
-}
-*/
 
 void SmartPortPhaseIRQ(){
     
@@ -285,8 +268,8 @@ static void SmartPortReceiveRDDataIRQ(){
     if (rdStartOffset!=0)                                                     // Start writing to packet_buffer only if offset is not 0 (after sync byte)
       rdBytes++;
     
-    if (rdBytes==600)
-      rdBytes=0;
+    //if (rdBytes==600)
+    //  rdBytes=0;
     
   }
   rdBitCounter++;                                      // Next bit please ;)
@@ -364,7 +347,7 @@ static int decodeDataPacket (char * packet_buffer, int pl){
      checksum = checksum ^ packet_buffer[count];   
 
   log_info("decode Data checksum %02X<>%02X",checksum,(oddbits | evenbits));
-  print_packet ((unsigned char*) packet_buffer,pl);
+  print_packet (0,(unsigned char*) packet_buffer,pl);
   
   if (checksum == (oddbits | evenbits))
       return 0;                                                                                   // NO error
@@ -515,13 +498,14 @@ C3              PBEGIN    MARKS BEGINNING OF PACKET             32 micro Sec.   
 // Description: prints packet data for debug purposes to the serial port
 //*****************************************************************************
 
-static void print_packet (unsigned char* data, int bytes){
+static void print_packet (unsigned char Emit,unsigned char* data, int bytes){
   int count, row;
   char xx;
-
-  //log_info("Dump packet src:%02X,dst:%02X,type:%02X,aux:%02x,cmd:%02X,paramcnt:%02X",data[SP_SRC],data[SP_DEST],data[SP_TYPE],data[SP_AUX],data[SP_COMMAND],data[SP_PARMCNT]);
-  log_info("Packet size:%03d, src:%02X, dst:%02X, type:%02X, aux:%02x, cmd:%02X, paramcnt:%02X",bytes,data[SP_SRC],data[SP_DEST],data[SP_TYPE],data[SP_AUX],data[SP_COMMAND],data[SP_PARMCNT]);
-
+  if (Emit==1)
+    log_info("HOST Packet size:%03d, src:%02X, dst:%02X, type:%02X, aux:%02x, cmd:%02X, paramcnt:%02X",bytes,data[SP_SRC],data[SP_DEST],data[SP_TYPE],data[SP_AUX],data[SP_COMMAND],data[SP_PARMCNT]);
+  else 
+    log_info("DEVICE Packet size:%03d, src:%02X, dst:%02X, type:%02X, aux:%02x, cmd:%02X, paramcnt:%02X",bytes,data[SP_SRC],data[SP_DEST],data[SP_TYPE],data[SP_AUX],data[SP_COMMAND],data[SP_PARMCNT]);
+ 
 
   for (count = 0; count < bytes; count = count + 16) {
       
@@ -631,30 +615,78 @@ int main(void)
             
             HAL_TIM_OC_Stop_IT(&htim2,TIM_CHANNEL_2);
             while (WP_ACK==1);
+
             WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_RESET);
             packet_bufferWR[wrBytes]=0x0; 
-            WritePin(DEBUG2_GPIO_Port,DEBUG2_Pin,GPIO_PIN_SET);
-            print_packet(packet_bufferWR,wrBytes);
-            verifyCmdpktChecksum2(packet_bufferWR,wrBytes);
-            print_packet(packet_bufferRD,wrBytes);
+            //WritePin(DEBUG2_GPIO_Port,DEBUG2_Pin,GPIO_PIN_SET);
+            //print_packet(1,packet_bufferWR,wrBytes);
+            //verifyCmdpktChecksum2(packet_bufferWR,wrBytes);
+            
+            if (rdBytes!=0){
+              if (rdBytes>24)
+                rdBytes=24;
+              //print_packet(2,packet_bufferRD,rdBytes);
+            }
             //verifyCmdpktChecksum2(packet_bufferRD,rdBytes);
-            WritePin(DEBUG2_GPIO_Port,DEBUG2_Pin,GPIO_PIN_RESET);
+            //WritePin(DEBUG2_GPIO_Port,DEBUG2_Pin,GPIO_PIN_RESET);
             
             rdStartOffset=0;
             rdBitCounter=0;
             rdBytes=0;
             rdByteWindow=0;
             printf("idx:%04d\n",packetIdx);
+            
             while (WP_ACK==0);
+
+            // 
+
             HAL_TIM_OC_Start_IT(&htim1,TIM_CHANNEL_1);
             WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_SET); 
 
-            while (WP_ACK==1);
-            HAL_TIM_OC_Stop_IT(&htim1,TIM_CHANNEL_1);
-            WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_RESET);
+            while(1){
+              if (WR_REQ_PHASE==0){
+                // We have an new imcomming data from Host;
+                WritePin(DEBUG2_GPIO_Port,DEBUG2_Pin,GPIO_PIN_SET);
+                HAL_TIM_OC_Stop_IT(&htim1,TIM_CHANNEL_1);
+                wrStartOffset=0;
+                wrBitCounter=0;
+                wrBytes=0;
+                wrByteWindow=0;
+                HAL_TIM_OC_Start_IT(&htim2,TIM_CHANNEL_2);
+                while (WR_REQ_PHASE==0);
+                HAL_TIM_OC_Stop_IT(&htim2,TIM_CHANNEL_2);
 
-            while(WP_ACK==0);
-            packet_bufferRD[rdBytes]=0x0;
+                while (WP_ACK==1);
+                WritePin(DEBUG2_GPIO_Port,DEBUG2_Pin,GPIO_PIN_RESET); 
+                packet_bufferWR[wrBytes]=0x0;
+                while (WP_ACK==0);                                      // After That the reading answer from the Device
+                rdStartOffset=0;
+                rdBitCounter=0;
+                rdBytes=0;
+                rdByteWindow=0;
+                HAL_TIM_OC_Start_IT(&htim1,TIM_CHANNEL_1);
+                WritePin(DEBUG2_GPIO_Port,DEBUG2_Pin,GPIO_PIN_SET); 
+                while (WP_ACK==1);
+                HAL_TIM_OC_Stop_IT(&htim1,TIM_CHANNEL_1);
+                packet_bufferRD[rdBytes]=0x0;
+                WritePin(DEBUG2_GPIO_Port,DEBUG2_Pin,GPIO_PIN_RESET);       // we have our second request
+                break;
+              
+              }else if (WP_ACK==0){                                         // Normal case of Device Sending after 1 request
+                  HAL_TIM_OC_Stop_IT(&htim1,TIM_CHANNEL_1);
+                  WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_RESET);
+                  packet_bufferRD[rdBytes]=0x0;
+                  break;
+                
+              }
+            }
+
+            //while (WP_ACK==1);
+            //HAL_TIM_OC_Stop_IT(&htim1,TIM_CHANNEL_1);
+            //WritePin(DEBUG1_GPIO_Port,DEBUG1_Pin,GPIO_PIN_RESET);
+
+            //while(WP_ACK==0);
+            //packet_bufferRD[rdBytes]=0x0;
             packetIdx++;
             
 
@@ -876,7 +908,7 @@ static void MX_USART1_UART_Init(void)
 
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = 921600; //460800;
+  huart1.Init.BaudRate = 1152000;// 921600; //460800;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
